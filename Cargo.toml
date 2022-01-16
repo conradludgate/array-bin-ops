@@ -1,0 +1,17 @@
+[package]
+name = "array-bin-ops"
+version = "0.1.0"
+edition = "2021"
+description = "Efficient array binary operations"
+repository = "https://github.com/conradludgate/array-bin-ops"
+keywords = ["const-generics", "mathematics"]
+license-file = "LICENSE"
+
+[dependencies]
+
+[dev-dependencies]
+mockalloc = "0.1.2"
+
+[features]
+default = ['std']
+std = []
