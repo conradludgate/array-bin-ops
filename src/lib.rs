@@ -11,6 +11,19 @@ use iter::{BinOpsIter, Iter};
 
 pub struct Array<T, const N: usize>(pub [T; N]);
 
+macro_rules! unroll {
+    ($N:ident by $M:literal $body:tt) => {{
+        for _ in 0..$N % $M {
+            $body
+        }
+        for _ in 0..$N / $M {
+            for _ in 0..$M {
+                $body
+            }
+        }
+    }};
+}
+
 fn binop_impl<T, U, O, const N: usize>(
     lhs: [T; N],
     rhs: [U; N],
@@ -18,13 +31,11 @@ fn binop_impl<T, U, O, const N: usize>(
 ) -> [O; N] {
     let mut dc = BinOpsIter::new(lhs, rhs);
 
-    // even though we could get the index from `dc.i`, the for loop ends up with better optimisations
-    // since it can be understood as a constant-loop and unrolled accordingly
-    for _ in 0..N {
+    unroll!(N by 32 {
         // SAFETY:
         // Will only be called a maximum of N times
         unsafe { dc.step(op) }
-    }
+    });
 
     // SAFETY:
     // By this point, we are certain we have initialised all N elements
@@ -38,13 +49,11 @@ fn binop_assign_impl<T, U, const N: usize>(
 ) {
     let mut dc = Iter::new(rhs);
 
-    // even though we could get the index from `dc.i`, the for loop ends up with better optimisations
-    // since it can be understood as a constant-loop and unrolled accordingly
-    for i in 0..N {
+    unroll!(N by 32 {
         // SAFETY:
         // Will only be called a maximum of N times
-        unsafe { op(lhs.get_unchecked_mut(i), dc.next_unchecked()) }
-    }
+        unsafe { op(lhs.get_unchecked_mut(dc.index()), dc.next_unchecked()) }
+    })
 }
 
 macro_rules! binop {

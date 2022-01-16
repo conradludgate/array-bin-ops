@@ -4,20 +4,22 @@ use core::ptr::drop_in_place;
 
 /// Like [`Iter`], but traverses 3 arrays at once
 pub struct BinOpsIter<T, U, O, const N: usize> {
-    rhs: Iter<U, N>,
     lhs: [MaybeUninit<T>; N],
+    rhs: [MaybeUninit<U>; N],
     output: [MaybeUninit<O>; N],
+    i: usize,
 }
 
 impl<T, U, O, const N: usize> Drop for BinOpsIter<T, U, O, N> {
     fn drop(&mut self) {
-        let i = self.rhs.i;
+        let i = self.i;
         // SAFETY:
         // `i` defines how many elements have been processed from the arrays.
         // Caveat, the only potential panic would happen *before* the write to the output,
         // so the `i`th output is not initialised as one would assume.
         unsafe {
             drop_in_place((&mut self.lhs[i..]) as *mut [_] as *mut [T]);
+            drop_in_place((&mut self.rhs[i..]) as *mut [_] as *mut [T]);
             drop_in_place(&mut self.output[..i - 1] as *mut [_] as *mut [O]);
         }
     }
@@ -26,16 +28,17 @@ impl<T, U, O, const N: usize> Drop for BinOpsIter<T, U, O, N> {
 impl<T, U, O, const N: usize> BinOpsIter<T, U, O, N> {
     pub fn new(lhs: [T; N], rhs: [U; N]) -> Self {
         Self {
-            rhs: Iter::new(rhs),
             lhs: mu_array(lhs),
+            rhs: mu_array(rhs),
             output: uninit_array(),
+            i: 0
         }
     }
 
     /// # Safety
     /// All values of output must be initialised, and all values in the inputs must be consumed
     pub unsafe fn output(self) -> [O; N] {
-        debug_assert_eq!(self.rhs.i, N);
+        debug_assert_eq!(self.i, N);
 
         let md = ManuallyDrop::new(self);
         // SAFETY:
@@ -46,14 +49,16 @@ impl<T, U, O, const N: usize> BinOpsIter<T, U, O, N> {
     /// # Safety
     /// Must be called no more than `N` times.
     pub unsafe fn step(&mut self, f: impl FnOnce(T, U) -> O) {
+        debug_assert!(self.i < N);
+
         // SAFETY:
-        // Since `dc.i` is stricty-monotonic, we will only
-        // take each element only once from each of lhs/rhs
+        // Since `self.i` is stricty-monotonic, we will only
+        // take each element only once from each of lhs/rhs/out
         unsafe {
-            let i = self.rhs.i;
-            let rhs = self.rhs.next_unchecked();
-            let lhs = take(self.lhs.get_unchecked_mut(i));
-            let out = self.output.get_unchecked_mut(i);
+            let lhs = take(self.lhs.get_unchecked_mut(self.i));
+            let rhs = take(self.rhs.get_unchecked_mut(self.i));
+            let out = self.output.get_unchecked_mut(self.i);
+            self.i += 1;
             out.write(f(lhs, rhs));
         }
     }
@@ -79,6 +84,10 @@ impl<U, const N: usize> Drop for Iter<U, N> {
 }
 
 impl<U, const N: usize> Iter<U, N> {
+    pub fn index(&self) -> usize {
+        self.i
+    }
+
     pub fn new(rhs: [U; N]) -> Self {
         Self {
             rhs: mu_array(rhs),
