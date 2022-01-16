@@ -1,11 +1,11 @@
+use core::mem::transmute_copy;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::drop_in_place;
-use core::mem::transmute_copy;
 
 /// Like [`Iter`], but traverses 3 arrays at once
 pub struct BinOpsIter<T, U, O, const N: usize> {
     rhs: Iter<U, N>,
-    lhs: [ManuallyDrop<T>; N],
+    lhs: [MaybeUninit<T>; N],
     output: [MaybeUninit<O>; N],
 }
 
@@ -27,7 +27,7 @@ impl<T, U, O, const N: usize> BinOpsIter<T, U, O, N> {
     pub fn new(lhs: [T; N], rhs: [U; N]) -> Self {
         Self {
             rhs: Iter::new(rhs),
-            lhs: md_array(lhs),
+            lhs: mu_array(lhs),
             output: uninit_array(),
         }
     }
@@ -52,7 +52,7 @@ impl<T, U, O, const N: usize> BinOpsIter<T, U, O, N> {
         unsafe {
             let i = self.rhs.i;
             let rhs = self.rhs.next_unchecked();
-            let lhs = ManuallyDrop::take(self.lhs.get_unchecked_mut(i));
+            let lhs = take(self.lhs.get_unchecked_mut(i));
             let out = self.output.get_unchecked_mut(i);
             out.write(f(lhs, rhs));
         }
@@ -62,7 +62,7 @@ impl<T, U, O, const N: usize> BinOpsIter<T, U, O, N> {
 /// For sake of optimisation, it's a simplified version of [`array::IntoIter`]
 /// that can only go forward, and can only be accessed through unsafe (to avoid bounds checks)
 pub struct Iter<U, const N: usize> {
-    rhs: [ManuallyDrop<U>; N],
+    rhs: [MaybeUninit<U>; N],
     i: usize,
 }
 
@@ -81,7 +81,7 @@ impl<U, const N: usize> Drop for Iter<U, N> {
 impl<U, const N: usize> Iter<U, N> {
     pub fn new(rhs: [U; N]) -> Self {
         Self {
-            rhs: md_array(rhs),
+            rhs: mu_array(rhs),
             i: 0,
         }
     }
@@ -100,16 +100,22 @@ impl<U, const N: usize> Iter<U, N> {
         // SAFETY:
         // Since `dc.i` is stricty-monotonic, we will only
         // take each element only once from each of lhs/rhs
-        let rhs = unsafe { ManuallyDrop::take(rhs) };
+        let rhs = unsafe { take(rhs) };
 
         self.i += 1;
         rhs
     }
 }
 
+pub unsafe fn take<T>(slot: &mut MaybeUninit<T>) -> T {
+    // SAFETY: we are reading from a reference, which is guaranteed
+    // to be valid for reads.
+    unsafe { core::ptr::read(slot.assume_init_mut()) }
+}
+
 /// Create a new `[ManuallyDrop<U>; N]` from the initialised array
-fn md_array<T, const N: usize>(a: [T; N]) -> [ManuallyDrop<T>; N] {
-    a.map(ManuallyDrop::new)
+fn mu_array<T, const N: usize>(a: [T; N]) -> [MaybeUninit<T>; N] {
+    a.map(MaybeUninit::new)
 }
 
 pub fn uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
