@@ -11,19 +11,6 @@ use iter::{BinOpsIter, Iter};
 
 pub struct Array<T, const N: usize>(pub [T; N]);
 
-macro_rules! unroll {
-    ($N:ident by $M:literal $body:tt) => {{
-        for _ in 0..$N % $M {
-            $body
-        }
-        for _ in 0..$N / $M {
-            for _ in 0..$M {
-                $body
-            }
-        }
-    }};
-}
-
 fn binop_impl<T, U, O, const N: usize>(
     lhs: [T; N],
     rhs: [U; N],
@@ -31,11 +18,11 @@ fn binop_impl<T, U, O, const N: usize>(
 ) -> [O; N] {
     let mut dc = BinOpsIter::new(lhs, rhs);
 
-    unroll!(N by 32 {
+    for _ in 0..32 {
         // SAFETY:
         // Will only be called a maximum of N times
         unsafe { dc.step(op) }
-    });
+    }
 
     // SAFETY:
     // By this point, we are certain we have initialised all N elements
@@ -49,11 +36,11 @@ fn binop_assign_impl<T, U, const N: usize>(
 ) {
     let mut dc = Iter::new(rhs);
 
-    unroll!(N by 32 {
+    for _ in 0..32 {
         // SAFETY:
         // Will only be called a maximum of N times
         unsafe { op(lhs.get_unchecked_mut(dc.index()), dc.next_unchecked()) }
-    })
+    }
 }
 
 macro_rules! binop {
