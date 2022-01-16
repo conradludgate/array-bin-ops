@@ -55,6 +55,17 @@ macro_rules! binop {
                 binop_impl(self.0, rhs, T::$method)
             }
         }
+
+        impl<T, U, const N: usize> $trait<Array<U, N>> for Array<T, N>
+        where
+            T: $trait<U>,
+        {
+            type Output = Array<T::Output, N>;
+
+            fn $method(self, rhs: Array<U, N>) -> Self::Output {
+                Array(binop_impl(self.0, rhs.0, T::$method))
+            }
+        }
     };
 }
 
@@ -66,6 +77,15 @@ macro_rules! binop_assign {
         {
             fn $method(&mut self, rhs: [U; N]) {
                 binop_assign_impl(&mut self.0, rhs, T::$method)
+            }
+        }
+
+        impl<T, U, const N: usize> $trait<Array<U, N>> for Array<T, N>
+        where
+            T: $trait<U>,
+        {
+            fn $method(&mut self, rhs: Array<U, N>) {
+                binop_assign_impl(&mut self.0, rhs.0, T::$method)
             }
         }
     };
