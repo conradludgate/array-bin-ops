@@ -18,7 +18,7 @@ fn binop_impl<T, U, O, const N: usize>(
 ) -> [O; N] {
     let mut dc = BinOpsIter::new(lhs, rhs);
 
-    for _ in 0..32 {
+    for _ in 0..N {
         // SAFETY:
         // Will only be called a maximum of N times
         unsafe { dc.step(op) }
@@ -36,7 +36,7 @@ fn binop_assign_impl<T, U, const N: usize>(
 ) {
     let mut dc = Iter::new(rhs);
 
-    for _ in 0..32 {
+    for _ in 0..N {
         // SAFETY:
         // Will only be called a maximum of N times
         unsafe { op(lhs.get_unchecked_mut(dc.index()), dc.next_unchecked()) }
