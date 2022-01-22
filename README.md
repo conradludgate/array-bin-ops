@@ -3,6 +3,7 @@
 An example implementation of Array Element-Wise Binary Operations in Rust.
 
 Trying to produce efficient code where possible, avoiding any memory safety issues.
+Current benchmarks show it being faster than any safe code currently available (using std only)
 
 ## Example ASM
 

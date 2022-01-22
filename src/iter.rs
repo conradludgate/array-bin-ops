@@ -94,7 +94,7 @@ pub fn uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
 #[inline(always)]
 pub unsafe fn assume_array_init<T, const N: usize>(a: &[MaybeUninit<T>; N]) -> [T; N] {
     // SAFETY: MaybeUninit is guaranteed to have the same layout
-    // replace with [`MaybeUninit::assume_array_init`] in std when stable
+    // replace with [`MaybeUninit::array_assume_init`] in std when stable
     unsafe { transmute_copy(a) }
 }
 
