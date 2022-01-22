@@ -2,6 +2,7 @@
 #![cfg_attr(not(any(doc, test, feature = "std")), no_std)]
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use std::mem::{needs_drop, MaybeUninit};
 
 #[cfg(test)]
 mod tests;
@@ -12,6 +13,20 @@ use iter::Slice;
 pub struct Array<T, const N: usize>(pub [T; N]);
 
 fn binop_impl<T, U, O, const N: usize>(
+    lhs: [T; N],
+    rhs: [U; N],
+    op: impl Fn(T, U) -> O + Copy,
+) -> [O; N] {
+    if !needs_drop::<T>() && !needs_drop::<U>() && !needs_drop::<O>() {
+        // SAFETY:
+        // we've just checked that T, U and O are non-drop types
+        unsafe { binop_impl_copy(lhs, rhs, op) }
+    } else {
+        binop_impl_drop(lhs, rhs, op)
+    }
+}
+
+fn binop_impl_drop<T, U, O, const N: usize>(
     lhs: [T; N],
     rhs: [U; N],
     op: impl Fn(T, U) -> O + Copy,
@@ -31,23 +46,28 @@ fn binop_impl<T, U, O, const N: usize>(
     unsafe { output.output() }
 }
 
-fn zip<T, U, const N: usize>(
+/// # Safety
+/// must only be called if T, U and O are Copy types (no drop needed)
+unsafe fn binop_impl_copy<T, U, O, const N: usize>(
     lhs: [T; N],
     rhs: [U; N],
-) -> [(T, U); N] {
-    let mut lhs = Slice::full(lhs);
-    let mut rhs = Slice::full(rhs);
-    let mut output = Slice::new();
+    op: impl Fn(T, U) -> O + Copy,
+) -> [O; N] {
+    // SAFETY:
+    // we will not read from output, and caller ensures that O is non-drop
+    // this makes miri sad by saves a memcpy on the return value so idc
+    #[allow(clippy::uninit_assumed_init)]
+    let mut output: [O; N] = unsafe { MaybeUninit::uninit().assume_init() };
 
-    for _ in 0..N {
+    for i in 0..N {
         unsafe {
-            let lhs = lhs.pop_front_unchecked();
-            let rhs = rhs.pop_front_unchecked();
-            output.push_unchecked((lhs, rhs));
+            let lhs = core::ptr::read(&lhs[i]);
+            let rhs = core::ptr::read(&rhs[i]);
+            output[i] = op(lhs, rhs);
         }
     }
 
-    unsafe { output.output() }
+    output
 }
 
 fn binop_assign_impl<T, U, const N: usize>(
