@@ -1,14 +1,14 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![cfg_attr(not(any(doc, test, feature = "std")), no_std)]
 
+use core::mem::{needs_drop, MaybeUninit};
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
-use std::mem::{needs_drop, MaybeUninit};
 
 #[cfg(test)]
 mod tests;
 
 mod iter;
-use iter::Slice;
+use iter::{uninit_array, Slice};
 
 pub struct Array<T, const N: usize>(pub [T; N]);
 
@@ -55,19 +55,17 @@ unsafe fn binop_impl_copy<T, U, O, const N: usize>(
 ) -> [O; N] {
     // SAFETY:
     // we will not read from output, and caller ensures that O is non-drop
-    // this makes miri sad by saves a memcpy on the return value so idc
-    #[allow(clippy::uninit_assumed_init)]
-    let mut output: [O; N] = unsafe { MaybeUninit::uninit().assume_init() };
+    let mut output: [MaybeUninit<O>; N] = uninit_array();
 
     for i in 0..N {
         unsafe {
             let lhs = core::ptr::read(&lhs[i]);
             let rhs = core::ptr::read(&rhs[i]);
-            output[i] = op(lhs, rhs);
+            output[i].write(op(lhs, rhs));
         }
     }
 
-    output
+    unsafe { core::ptr::read(&output as *const [MaybeUninit<O>; N] as *const [O; N]) }
 }
 
 fn binop_assign_impl<T, U, const N: usize>(
