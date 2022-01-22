@@ -2,11 +2,12 @@
 #![cfg_attr(not(any(doc, test, feature = "std")), no_std)]
 
 use core::mem::{needs_drop, MaybeUninit};
-use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use core::ops::{Add, Div, Mul, Sub};
 
 #[cfg(test)]
 mod tests;
 
+pub mod assign;
 mod iter;
 use iter::{uninit_array, Slice};
 
@@ -68,20 +69,6 @@ unsafe fn binop_impl_copy<T, U, O, const N: usize>(
     unsafe { core::ptr::read(&output as *const [MaybeUninit<O>; N] as *const [O; N]) }
 }
 
-fn binop_assign_impl<T, U, const N: usize>(
-    lhs: &mut [T; N],
-    rhs: [U; N],
-    op: impl Fn(&mut T, U) + Copy,
-) {
-    let mut rhs = Slice::full(rhs);
-
-    for i in 0..N {
-        // SAFETY:
-        // Will only be called a maximum of N times
-        unsafe { op(lhs.get_unchecked_mut(i), rhs.pop_front_unchecked()) }
-    }
-}
-
 macro_rules! binop {
     ($trait:ident, $method:ident) => {
         impl<T, U, const N: usize> $trait<[U; N]> for Array<T, N>
@@ -108,34 +95,7 @@ macro_rules! binop {
     };
 }
 
-macro_rules! binop_assign {
-    ($trait:ident, $method:ident) => {
-        impl<T, U, const N: usize> $trait<[U; N]> for Array<T, N>
-        where
-            T: $trait<U>,
-        {
-            fn $method(&mut self, rhs: [U; N]) {
-                binop_assign_impl(&mut self.0, rhs, T::$method)
-            }
-        }
-
-        impl<T, U, const N: usize> $trait<Array<U, N>> for Array<T, N>
-        where
-            T: $trait<U>,
-        {
-            fn $method(&mut self, rhs: Array<U, N>) {
-                binop_assign_impl(&mut self.0, rhs.0, T::$method)
-            }
-        }
-    };
-}
-
 binop!(Add, add);
 binop!(Mul, mul);
 binop!(Div, div);
 binop!(Sub, sub);
-
-binop_assign!(AddAssign, add_assign);
-binop_assign!(MulAssign, mul_assign);
-binop_assign!(DivAssign, div_assign);
-binop_assign!(SubAssign, sub_assign);
