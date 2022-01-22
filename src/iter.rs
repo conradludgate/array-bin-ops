@@ -1,121 +1,77 @@
 use core::mem::transmute_copy;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::drop_in_place;
+use std::ops::Range;
 
-/// Like [`Iter`], but traverses 3 arrays at once
-pub struct BinOpsIter<T, U, O, const N: usize> {
-    lhs: [MaybeUninit<T>; N],
-    rhs: [MaybeUninit<U>; N],
-    output: [MaybeUninit<O>; N],
-    i: usize,
+pub struct Slice<T, const N: usize> {
+    array: [MaybeUninit<T>; N],
+    alive: Range<usize>,
 }
 
-impl<T, U, O, const N: usize> Drop for BinOpsIter<T, U, O, N> {
+impl<T, const N: usize> Drop for Slice<T, N> {
+    #[inline(always)]
     fn drop(&mut self) {
-        let i = self.i;
         // SAFETY:
-        // `i` defines how many elements have been processed from the arrays.
-        // Caveat, the only potential panic would happen *before* the write to the output,
-        // so the `i`th output is not initialised as one would assume.
+        // The slice guarantees that `alive` is all initialised and that the other data is uninit
         unsafe {
-            drop_in_place((&mut self.lhs[i..]) as *mut [_] as *mut [T]);
-            drop_in_place((&mut self.rhs[i..]) as *mut [_] as *mut [T]);
-            drop_in_place(&mut self.output[..i - 1] as *mut [_] as *mut [O]);
+            drop_in_place(slice_assume_init_mut(&mut self.array[self.alive.clone()]));
         }
     }
 }
 
-impl<T, U, O, const N: usize> BinOpsIter<T, U, O, N> {
-    pub fn new(lhs: [T; N], rhs: [U; N]) -> Self {
+impl<T, const N: usize> Slice<T, N> {
+    #[inline(always)]
+    pub fn new() -> Self {
         Self {
-            lhs: mu_array(lhs),
-            rhs: mu_array(rhs),
-            output: uninit_array(),
-            i: 0
+            array: uninit_array(),
+            alive: 0..0,
+        }
+    }
+
+    #[inline(always)]
+    pub fn full(arr: [T; N]) -> Self {
+        Self {
+            array: mu_array(arr),
+            alive: 0..N,
         }
     }
 
     /// # Safety
     /// All values of output must be initialised, and all values in the inputs must be consumed
-    pub unsafe fn output(self) -> [O; N] {
-        debug_assert_eq!(self.i, N);
+    #[inline(always)]
+    pub unsafe fn output(self) -> [T; N] {
+        debug_assert_eq!(self.alive, 0..N);
 
         let md = ManuallyDrop::new(self);
         // SAFETY:
         // caller is responsible for ensuring the output is fully initialised
-        unsafe { assume_array_init(&md.output) }
+        unsafe { assume_array_init(&md.array) }
     }
 
-    /// # Safety
-    /// Must be called no more than `N` times.
-    pub unsafe fn step(&mut self, f: impl FnOnce(T, U) -> O) {
-        debug_assert!(self.i < N);
-
-        // SAFETY:
-        // Since `self.i` is stricty-monotonic, we will only
-        // take each element only once from each of lhs/rhs/out
-        unsafe {
-            let lhs = take(self.lhs.get_unchecked_mut(self.i));
-            let rhs = take(self.rhs.get_unchecked_mut(self.i));
-            let out = self.output.get_unchecked_mut(self.i);
-            self.i += 1;
-            out.write(f(lhs, rhs));
-        }
-    }
-}
-
-/// For sake of optimisation, it's a simplified version of [`array::IntoIter`]
-/// that can only go forward, and can only be accessed through unsafe (to avoid bounds checks)
-pub struct Iter<U, const N: usize> {
-    rhs: [MaybeUninit<U>; N],
-    i: usize,
-}
-
-impl<U, const N: usize> Drop for Iter<U, N> {
-    fn drop(&mut self) {
-        let i = self.i;
-        // SAFETY:
-        // `i` defines how many elements have been processed from the array,
-        // meaning that theres `i..` elements left to process (and therefore, drop)
-        unsafe {
-            drop_in_place((&mut self.rhs[i..]) as *mut [_] as *mut [U]);
-        }
-    }
-}
-
-impl<U, const N: usize> Iter<U, N> {
-    pub fn index(&self) -> usize {
-        self.i
-    }
-
-    pub fn new(rhs: [U; N]) -> Self {
-        Self {
-            rhs: mu_array(rhs),
-            i: 0,
-        }
-    }
-
-    /// # Safety
-    /// Must be called no more than `N` times.
     #[inline(always)]
-    pub unsafe fn next_unchecked(&mut self) -> U {
-        debug_assert!(self.i < N);
+    pub unsafe fn pop_front_unchecked(&mut self) -> T {
+        debug_assert!(!self.alive.is_empty());
+        debug_assert!(self.alive.start < N);
 
-        // SAFETY:
-        // Caller ensures that next is not called more than `N` times, so self.i must be
-        // smaller than N at this point
-        let rhs = unsafe { self.rhs.get_unchecked_mut(self.i) };
+        unsafe {
+            let front = take(self.array.get_unchecked_mut(self.alive.start));
+            self.alive.start += 1;
+            front
+        }
+    }
 
-        // SAFETY:
-        // Since `dc.i` is stricty-monotonic, we will only
-        // take each element only once from each of lhs/rhs
-        let rhs = unsafe { take(rhs) };
+    #[inline(always)]
+    pub unsafe fn push_unchecked(&mut self, value: T) {
+        debug_assert!(self.alive.end < N);
 
-        self.i += 1;
-        rhs
+        unsafe {
+            self.array.get_unchecked_mut(self.alive.end).write(value);
+            self.alive.end += 1;
+        }
     }
 }
 
+#[inline(always)]
 pub unsafe fn take<T>(slot: &mut MaybeUninit<T>) -> T {
     // SAFETY: we are reading from a reference, which is guaranteed
     // to be valid for reads.
@@ -123,18 +79,28 @@ pub unsafe fn take<T>(slot: &mut MaybeUninit<T>) -> T {
 }
 
 /// Create a new `[ManuallyDrop<U>; N]` from the initialised array
+#[inline(always)]
 fn mu_array<T, const N: usize>(a: [T; N]) -> [MaybeUninit<T>; N] {
     a.map(MaybeUninit::new)
 }
 
+#[inline(always)]
 pub fn uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
     // SAFETY: An uninitialized `[MaybeUninit<_>; N]` is valid.
     // replace with [`MaybeUninit::uninit_array`] in std when stable
     unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() }
 }
 
+#[inline(always)]
 pub unsafe fn assume_array_init<T, const N: usize>(a: &[MaybeUninit<T>; N]) -> [T; N] {
     // SAFETY: MaybeUninit is guaranteed to have the same layout
     // replace with [`MaybeUninit::assume_array_init`] in std when stable
     unsafe { transmute_copy(a) }
+}
+
+#[inline(always)]
+pub unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
+    // SAFETY: similar to safety notes for `slice_get_ref`, but we have a
+    // mutable reference which is also guaranteed to be valid for writes.
+    unsafe { &mut *(slice as *mut [MaybeUninit<T>] as *mut [T]) }
 }

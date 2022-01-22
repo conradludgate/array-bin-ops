@@ -7,7 +7,7 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 mod tests;
 
 mod iter;
-use iter::{BinOpsIter, Iter};
+use iter::Slice;
 
 pub struct Array<T, const N: usize>(pub [T; N]);
 
@@ -16,17 +16,38 @@ fn binop_impl<T, U, O, const N: usize>(
     rhs: [U; N],
     op: impl Fn(T, U) -> O + Copy,
 ) -> [O; N] {
-    let mut dc = BinOpsIter::new(lhs, rhs);
+    let mut lhs = Slice::full(lhs);
+    let mut rhs = Slice::full(rhs);
+    let mut output = Slice::new();
 
     for _ in 0..N {
-        // SAFETY:
-        // Will only be called a maximum of N times
-        unsafe { dc.step(op) }
+        unsafe {
+            let lhs = lhs.pop_front_unchecked();
+            let rhs = rhs.pop_front_unchecked();
+            output.push_unchecked(op(lhs, rhs));
+        }
     }
 
-    // SAFETY:
-    // By this point, we are certain we have initialised all N elements
-    unsafe { dc.output() }
+    unsafe { output.output() }
+}
+
+fn zip<T, U, const N: usize>(
+    lhs: [T; N],
+    rhs: [U; N],
+) -> [(T, U); N] {
+    let mut lhs = Slice::full(lhs);
+    let mut rhs = Slice::full(rhs);
+    let mut output = Slice::new();
+
+    for _ in 0..N {
+        unsafe {
+            let lhs = lhs.pop_front_unchecked();
+            let rhs = rhs.pop_front_unchecked();
+            output.push_unchecked((lhs, rhs));
+        }
+    }
+
+    unsafe { output.output() }
 }
 
 fn binop_assign_impl<T, U, const N: usize>(
@@ -34,12 +55,12 @@ fn binop_assign_impl<T, U, const N: usize>(
     rhs: [U; N],
     op: impl Fn(&mut T, U) + Copy,
 ) {
-    let mut dc = Iter::new(rhs);
+    let mut rhs = Slice::full(rhs);
 
-    for _ in 0..N {
+    for i in 0..N {
         // SAFETY:
         // Will only be called a maximum of N times
-        unsafe { op(lhs.get_unchecked_mut(dc.index()), dc.next_unchecked()) }
+        unsafe { op(lhs.get_unchecked_mut(i), rhs.pop_front_unchecked()) }
     }
 }
 
