@@ -3,21 +3,19 @@ use core::ops::{AddAssign, DivAssign, MulAssign, SubAssign};
 
 use crate::{iter::Slice, Array};
 
-fn binop_assign_impl<T, U, const N: usize>(
-    lhs: &mut [T; N],
-    rhs: [U; N],
-    op: impl Fn(&mut T, U) + Copy,
-) {
-    if !needs_drop::<U>() {
-        // SAFETY:
-        // we've just checked that U is a non-drop type
-        unsafe { binop_assign_impl_copy(lhs, rhs, op) }
-    } else {
-        binop_assign_impl_drop(lhs, rhs, op)
+impl<T, const N: usize> Array<T, N> {
+    pub fn zip_mut_map<U>(&mut self, rhs: [U; N], op: impl Fn(&mut T, U) + Copy) {
+        if !needs_drop::<U>() {
+            // SAFETY:
+            // we've just checked that U is a non-drop type
+            unsafe { zip_mut_map_impl_copy(&mut self.0, rhs, op) }
+        } else {
+            zip_mut_map_impl_drop(&mut self.0, rhs, op)
+        }
     }
 }
 
-fn binop_assign_impl_drop<T, U, const N: usize>(
+fn zip_mut_map_impl_drop<T, U, const N: usize>(
     lhs: &mut [T; N],
     rhs: [U; N],
     op: impl Fn(&mut T, U) + Copy,
@@ -33,7 +31,7 @@ fn binop_assign_impl_drop<T, U, const N: usize>(
 
 /// # Safety
 /// must only be called if U is a copy type (no drop needed)
-unsafe fn binop_assign_impl_copy<T, U, const N: usize>(
+unsafe fn zip_mut_map_impl_copy<T, U, const N: usize>(
     lhs: &mut [T; N],
     rhs: [U; N],
     op: impl Fn(&mut T, U) + Copy,
@@ -55,7 +53,7 @@ macro_rules! binop_assign {
             T: $trait<U>,
         {
             fn $method(&mut self, rhs: [U; N]) {
-                binop_assign_impl(&mut self.0, rhs, T::$method)
+                self.zip_mut_map(rhs, T::$method)
             }
         }
 
@@ -64,7 +62,7 @@ macro_rules! binop_assign {
             T: $trait<U>,
         {
             fn $method(&mut self, rhs: Array<U, N>) {
-                binop_assign_impl(&mut self.0, rhs.0, T::$method)
+                self.zip_mut_map(rhs.0, T::$method)
             }
         }
     };

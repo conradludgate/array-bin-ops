@@ -4,21 +4,19 @@ use core::ops::{Add, Div, Mul, Sub};
 use crate::iter::uninit_array;
 use crate::{iter::Slice, Array};
 
-fn binop_impl<T, U, O, const N: usize>(
-    lhs: [T; N],
-    rhs: [U; N],
-    op: impl Fn(T, U) -> O + Copy,
-) -> [O; N] {
-    if !needs_drop::<T>() && !needs_drop::<U>() && !needs_drop::<O>() {
-        // SAFETY:
-        // we've just checked that T, U and O are non-drop types
-        unsafe { binop_impl_copy(lhs, rhs, op) }
-    } else {
-        binop_impl_drop(lhs, rhs, op)
+impl<T, const N: usize> Array<T, N> {
+    pub fn zip_map<U, O>(self, rhs: [U; N], op: impl Fn(T, U) -> O + Copy) -> [O; N] {
+        if !needs_drop::<T>() && !needs_drop::<U>() && !needs_drop::<O>() {
+            // SAFETY:
+            // we've just checked that T, U and O are non-drop types
+            unsafe { zip_map_impl_copy(self.0, rhs, op) }
+        } else {
+            zip_map_impl_drop(self.0, rhs, op)
+        }
     }
 }
 
-fn binop_impl_drop<T, U, O, const N: usize>(
+fn zip_map_impl_drop<T, U, O, const N: usize>(
     lhs: [T; N],
     rhs: [U; N],
     op: impl Fn(T, U) -> O + Copy,
@@ -40,7 +38,7 @@ fn binop_impl_drop<T, U, O, const N: usize>(
 
 /// # Safety
 /// must only be called if T, U and O are Copy types (no drop needed)
-unsafe fn binop_impl_copy<T, U, O, const N: usize>(
+unsafe fn zip_map_impl_copy<T, U, O, const N: usize>(
     lhs: [T; N],
     rhs: [U; N],
     op: impl Fn(T, U) -> O + Copy,
@@ -69,7 +67,7 @@ macro_rules! binop {
             type Output = [T::Output; N];
 
             fn $method(self, rhs: [U; N]) -> Self::Output {
-                binop_impl(self.0, rhs, T::$method)
+                self.zip_map(rhs, T::$method)
             }
         }
 
@@ -80,7 +78,7 @@ macro_rules! binop {
             type Output = Array<T::Output, N>;
 
             fn $method(self, rhs: Array<U, N>) -> Self::Output {
-                Array(binop_impl(self.0, rhs.0, T::$method))
+                Array(self.zip_map(rhs.0, T::$method))
             }
         }
     };
