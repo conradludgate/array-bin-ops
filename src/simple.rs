@@ -6,56 +6,36 @@ use crate::{iter::Slice, Array};
 
 impl<T, const N: usize> Array<T, N> {
     pub fn zip_map<U, O>(self, rhs: [U; N], op: impl Fn(T, U) -> O + Copy) -> [O; N] {
-        if !needs_drop::<T>() && !needs_drop::<U>() && !needs_drop::<O>() {
-            // SAFETY:
-            // we've just checked that T, U and O are non-drop types
-            unsafe { zip_map_impl_copy(self.0, rhs, op) }
+        if needs_drop::<T>() || needs_drop::<U>() || needs_drop::<O>() {
+            let mut lhs = Slice::full(self.0);
+            let mut rhs = Slice::full(rhs);
+            let mut output = Slice::new();
+
+            for _ in 0..N {
+                unsafe {
+                    let lhs = lhs.pop_front_unchecked();
+                    let rhs = rhs.pop_front_unchecked();
+                    output.push_unchecked(op(lhs, rhs));
+                }
+            }
+
+            unsafe { output.output() }
         } else {
-            zip_map_impl_drop(self.0, rhs, op)
+            // SAFETY:
+            // we will not read from output, and caller ensures that O is non-drop
+            let mut output: [MaybeUninit<O>; N] = uninit_array();
+
+            for i in 0..N {
+                unsafe {
+                    let lhs = core::ptr::read(&self.0[i]);
+                    let rhs = core::ptr::read(&rhs[i]);
+                    output[i].write(op(lhs, rhs));
+                }
+            }
+
+            unsafe { core::ptr::read(&output as *const [MaybeUninit<O>; N] as *const [O; N]) }
         }
     }
-}
-
-fn zip_map_impl_drop<T, U, O, const N: usize>(
-    lhs: [T; N],
-    rhs: [U; N],
-    op: impl Fn(T, U) -> O + Copy,
-) -> [O; N] {
-    let mut lhs = Slice::full(lhs);
-    let mut rhs = Slice::full(rhs);
-    let mut output = Slice::new();
-
-    for _ in 0..N {
-        unsafe {
-            let lhs = lhs.pop_front_unchecked();
-            let rhs = rhs.pop_front_unchecked();
-            output.push_unchecked(op(lhs, rhs));
-        }
-    }
-
-    unsafe { output.output() }
-}
-
-/// # Safety
-/// must only be called if T, U and O are Copy types (no drop needed)
-unsafe fn zip_map_impl_copy<T, U, O, const N: usize>(
-    lhs: [T; N],
-    rhs: [U; N],
-    op: impl Fn(T, U) -> O + Copy,
-) -> [O; N] {
-    // SAFETY:
-    // we will not read from output, and caller ensures that O is non-drop
-    let mut output: [MaybeUninit<O>; N] = uninit_array();
-
-    for i in 0..N {
-        unsafe {
-            let lhs = core::ptr::read(&lhs[i]);
-            let rhs = core::ptr::read(&rhs[i]);
-            output[i].write(op(lhs, rhs));
-        }
-    }
-
-    unsafe { core::ptr::read(&output as *const [MaybeUninit<O>; N] as *const [O; N]) }
 }
 
 macro_rules! binop {

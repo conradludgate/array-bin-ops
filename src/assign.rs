@@ -5,43 +5,28 @@ use crate::{iter::Slice, Array};
 
 impl<T, const N: usize> Array<T, N> {
     pub fn zip_mut_map<U>(&mut self, rhs: [U; N], op: impl Fn(&mut T, U) + Copy) {
-        if !needs_drop::<U>() {
-            // SAFETY:
-            // we've just checked that U is a non-drop type
-            unsafe { zip_mut_map_impl_copy(&mut self.0, rhs, op) }
+        if needs_drop::<U>() {
+            let mut rhs = Slice::full(rhs);
+
+            for i in 0..N {
+                // SAFETY:
+                // Will only be called a maximum of N times
+                unsafe {
+                    let lhs = self.0.get_unchecked_mut(i);
+                    let rhs = rhs.pop_front_unchecked();
+                    op(lhs, rhs)
+                }
+            }
         } else {
-            zip_mut_map_impl_drop(&mut self.0, rhs, op)
-        }
-    }
-}
-
-fn zip_mut_map_impl_drop<T, U, const N: usize>(
-    lhs: &mut [T; N],
-    rhs: [U; N],
-    op: impl Fn(&mut T, U) + Copy,
-) {
-    let mut rhs = Slice::full(rhs);
-
-    for i in 0..N {
-        // SAFETY:
-        // Will only be called a maximum of N times
-        unsafe { op(lhs.get_unchecked_mut(i), rhs.pop_front_unchecked()) }
-    }
-}
-
-/// # Safety
-/// must only be called if U is a copy type (no drop needed)
-unsafe fn zip_mut_map_impl_copy<T, U, const N: usize>(
-    lhs: &mut [T; N],
-    rhs: [U; N],
-    op: impl Fn(&mut T, U) + Copy,
-) {
-    for i in 0..N {
-        // SAFETY:
-        // Will only be called a maximum of N times
-        unsafe {
-            let rhs = core::ptr::read(&rhs[i]);
-            op(lhs.get_unchecked_mut(i), rhs)
+            for i in 0..N {
+                // SAFETY:
+                // Will only be called a maximum of N times
+                unsafe {
+                    let lhs = self.0.get_unchecked_mut(i);
+                    let rhs = core::ptr::read(&rhs[i]);
+                    op(lhs, rhs)
+                }
+            }
         }
     }
 }

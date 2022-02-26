@@ -11,6 +11,11 @@ license-file = "LICENSE"
 
 [dev-dependencies]
 mockalloc = "0.1.2"
+criterion = "0.3"
+
+[[bench]]
+name = "sum"
+harness = false
 
 [features]
 default = ['std']
