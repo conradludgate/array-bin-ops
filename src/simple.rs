@@ -5,7 +5,7 @@ use crate::iter::uninit_array;
 use crate::{iter::Slice, Array};
 
 impl<T, const N: usize> Array<T, N> {
-    pub fn zip_map<U, O>(self, rhs: [U; N], op: impl Fn(T, U) -> O + Copy) -> [O; N] {
+    pub fn zip_map<U, O>(self, rhs: [U; N], mut op: impl FnMut(T, U) -> O) -> [O; N] {
         if needs_drop::<T>() || needs_drop::<U>() || needs_drop::<O>() {
             let mut lhs = Slice::full(self.0);
             let mut rhs = Slice::full(rhs);
